@@ -1908,8 +1908,6 @@ form_html = '''
                 <form
                   id="wf-form-Lead-from-Lot convert-form"
                   name="wf-form-Lead-from-Lot"
-                  action="/"
-                  method="post"
                   class="form"
                 >
                   <div class="label">
