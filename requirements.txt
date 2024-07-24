@@ -1,4 +1,3 @@
 Flask
-pdfcrowd
-requests
-gunicorn
+request
+os
