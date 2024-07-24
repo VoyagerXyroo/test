@@ -2676,7 +2676,7 @@ form_html = '''
 
 def convert_url_to_pdf(url, filename):
     try:
-        client = pdfcrowd.HtmlToPdfClient('YOUR_API_KEY', 'YOUR_API_SECRET')
+        client = pdfcrowd.HtmlToPdfClient('Verrdryd', '95e498806f86b98f79226fdfdd8f62da')
         pdf_path = os.path.join(os.getcwd(), f"{filename}.pdf")
 
         # Function to handle timeout
