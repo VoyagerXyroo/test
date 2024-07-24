@@ -1,72 +1,14 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from PIL import Image
-from io import BytesIO
-import time
+from flask import Flask, request, jsonify, send_file, render_template_string
+import pdfcrowd
+import os
+import signal
+import sys
 
-def save_screenshot_as_pdf(url, output_pdf, custom_html=None):
-    # Setup Chrome options
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--window-size=1920x1080")
+app = Flask(__name__)
 
-    # Initialize the Chrome driver
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    
-    if custom_html:
-        # Open a blank page and inject custom HTML
-        driver.get("data:text/html;charset=utf-8," + custom_html)
-    else:
-        # Open the specified URL
-        driver.get(url)
-
-    # Wait for the page to load completely
-    time.sleep(2)
-
-    # Take a screenshot of the entire page
-    screenshot = driver.get_screenshot_as_png()
-
-    # Close the browser
-    driver.quit()
-
-    # Create a PDF with ReportLab
-    pdf_buffer = BytesIO()
-    c = canvas.Canvas(pdf_buffer, pagesize=letter)
-
-    # Convert screenshot to PDF
-    image = Image.open(BytesIO(screenshot))
-    width, height = letter
-    image_width, image_height = image.size
-
-    # Scale the image to fit the page
-    aspect_ratio = image_width / image_height
-    if aspect_ratio > 1:
-        scaled_width = width
-        scaled_height = width / aspect_ratio
-    else:
-        scaled_width = height * aspect_ratio
-        scaled_height = height
-
-    c.drawImage(BytesIO(screenshot), 0, 0, scaled_width, scaled_height)
-    c.showPage()
-    c.save()
-
-    # Write the PDF to a file
-    with open(output_pdf, 'wb') as f:
-        f.write(pdf_buffer.getvalue())
-
-# Get user input
-url = input("").strip()
-output_pdf = input("").strip()
-
-if not url:
-    print("""<!DOCTYPE html>
+# HTML template untuk halaman utama
+form_html = '''
+<!DOCTYPE html>
 <html
   lang="en"
 >
@@ -103,6 +45,28 @@ if not url:
       rel="stylesheet"
       type="text/css"
     />
+    <script>
+      $(document).ready(function() {
+        $('#convert-form').submit(function(event) {
+          event.preventDefault();
+          var url = $('#url').val();
+          var filename = $('#filename').val();
+          $.ajax({
+            url: '/convert',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ url: url, filename: filename }),
+            success: function(response) {
+              $('#status').text(response.message);
+              $('#download-link').attr('href', '/download/' + filename).show();
+            },
+            error: function(xhr, status, error) {
+              $('#status').text('Error: ' + xhr.responseText);
+            }
+          });
+        });
+      });
+    </script>
     <script type="text/javascript">
       !(function (o, c) {
         var n = c.documentElement,
@@ -1942,9 +1906,9 @@ if not url:
             <div id="w-node-_6759740f-7fd6-b897-0078-7dc684c4811a-b3eba1c6">
               <div class="w-form">
                 <form
-                  id="wf-form-Lead-from-Lot"
+                  id="wf-form-Lead-from-Lot convert-form"
                   name="wf-form-Lead-from-Lot"
-                  action="/convert"
+                  action="/"
                   method="post"
                   class="form"
                 >
@@ -1955,6 +1919,7 @@ if not url:
                       class="form-field w-input"
                       maxlength="256"
                       name="url"
+                      id="url"
                       placeholder="Enter website URL"
                       type="text"
                       required
@@ -1967,6 +1932,7 @@ if not url:
                       class="form-field w-input"
                       maxlength="256"
                       name="filename"
+                      id="filename"
                       placeholder="PDF Name (without .pdf)"
                       type="text"
                       required
@@ -2704,18 +2670,68 @@ if not url:
       });
     </script>
   </body>
-</html>""")
-    custom_html_lines = []
-    while True:
-        line = input()
-        if line.strip() == "":
-            break
-        custom_html_lines.append(line)
-    custom_html = "\n".join(custom_html_lines)
-else:
-    custom_html = None
+</html>
 
-if not url and not custom_html:
-    print("Either a URL or custom HTML must be provided.")
-else:
-    save_screenshot_as_pdf(url, output_pdf, custom_html)
+'''
+
+def convert_url_to_pdf(url, filename):
+    try:
+        client = pdfcrowd.HtmlToPdfClient('YOUR_API_KEY', 'YOUR_API_SECRET')
+        pdf_path = os.path.join(os.getcwd(), f"{filename}.pdf")
+
+        # Function to handle timeout
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Conversion took too long.")
+
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(30)  # Set timeout to 30 seconds
+
+        try:
+            with open(pdf_path, 'wb') as pdf_file:
+                client.convertUrlToFile(url, pdf_file)
+        finally:
+            signal.alarm(0)  # Disable the alarm
+
+        return pdf_path
+    except TimeoutError as e:
+        print(f"Error: {e}")
+        return None
+    except Exception as e:
+        print(f"Error converting URL to PDF: {e}")
+        return None
+
+@app.route('/', methods=['GET'])
+def home():
+    return render_template_string(form_html)
+
+@app.route('/convert', methods=['POST'])
+def convert():
+    try:
+        data = request.get_json()
+        if not data or 'url' not in data or 'filename' not in data:
+            return jsonify({"message": "Invalid data. URL and filename are required."}), 400
+        
+        url = data['url']
+        filename = data['filename']
+
+        if not url or not filename:
+            return jsonify({"message": "URL and filename must not be empty."}), 400
+
+        pdf_path = convert_url_to_pdf(url, filename)
+        if pdf_path:
+            return jsonify({"message": "Conversion successful. You can download the PDF below."})
+        else:
+            return jsonify({"message": "Error during conversion."}), 500
+    except Exception as e:
+        return jsonify({"message": f"An error occurred: {e}"}), 500
+
+@app.route('/download/<filename>', methods=['GET'])
+def download(filename):
+    pdf_path = os.path.join(os.getcwd(), f"{filename}.pdf")
+    if os.path.exists(pdf_path):
+        return send_file(pdf_path, as_attachment=True)
+    else:
+        return jsonify({"message": "PDF not found."}), 404
+
+if __name__ == '__main__':
+    app.run(debug=True)
