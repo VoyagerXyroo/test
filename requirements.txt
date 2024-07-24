@@ -1,4 +1,4 @@
-selenium
-reportlab
-Pillow
-webdriver-manager
+Flask
+pdfcrowd
+requests
+gunicorn
